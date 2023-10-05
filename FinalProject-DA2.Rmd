@@ -1,0 +1,329 @@
+---
+title: "DA2-Assignment3"
+author: "Maryam Khan"
+date: "12/15/2021"
+output: pdf_document
+---
+
+```{r include=FALSE}
+# Clear memory
+rm(list=ls())
+
+# Import libraries
+library(tidyverse)
+library(haven)
+library(data.table)
+library(rms)
+library(lspline)
+library(huxtable)
+library(modelsummary)
+library(pscl)
+library(mfx)
+library(kableExtra)
+library(lspline)
+library(dplR)
+library(fixest)
+library(ggthemes)
+library(kableExtra)
+library(reshape)
+
+##
+
+data_all <- read_csv(url("https://raw.githubusercontent.com/maryamkhan1120/DA2/main/FinalProject/housePrice.csv"))
+
+
+
+```
+
+```{r include=FALSE}
+#Data Cleaning
+#Changing variables to binary
+data1 <- data_all %>% mutate(Parking=as.numeric(Parking=="TRUE"), Warehouse=as.numeric(Warehouse=="TRUE"), Elevator=as.numeric(Elevator=="TRUE"))
+
+
+#changing column names
+colnames(data1)[8] <- "priceUSD"
+
+
+#filtering data for one address
+data1 <- data_all %>% filter(Address=="Punak")
+
+data1 <- data1 %>% mutate(room0=as.numeric(Room==0),
+  room1=as.numeric(Room==1),
+                      room2=as.numeric(Room==2),
+  room3=as.numeric(Room==3),
+                      room4=as.numeric(Room==4),
+                      room5=as.numeric(Room==5)
+)
+
+datasummary_skim(data_all)
+
+#changing column names
+colnames(data1)[8] <- "priceUSD"
+
+#Calculating price per area for a more standardized comparison and log price
+data1 <- data1 %>% mutate(lnprice=log(Price))
+
+P95 <- function(x){ quantile(x,.95,na.rm=T)}
+P5 <- function(x){ quantile(x,.05,na.rm=T)}
+
+sapply(data1, class) 
+data1$priceUSD <- as.numeric(as.character(data1$priceUSD))
+data1$lnprice <- as.numeric(as.character(data1$lnprice))
+
+#Variable summary
+variablesummary <- datasummary( (`priceUSD` = priceUSD ) + 
+             (`lnprice` = lnprice ) + 
+             (`Area` = Area ) + 
+             (`Parking` = Parking) + 
+             (`Elevator` = Elevator) + 
+             (`Warehouse` = Warehouse) + 
+             (`Room` = Room ) ~
+               Mean + Median + SD + Min + Max + P5 + P95 , 
+             data = data1 ,
+             title = 'Descriptive statistics') %>% 
+      kable_styling(latex_options = c("HOLD_position","scale_down"))
+variablesummary
+
+#Visualizing price_area. Distribution skewed to the right
+ pd <- ggplot(data = data1, aes(x=Price))+
+   geom_density()
+ 
+
+#Visualizing log price. No skewness
+pd1 <- ggplot(data = data1, aes(x=lnprice))+
+  geom_density()
+  
+scatterplot <- ggplot(data= data1, aes(x=Area, y=priceUSD))+
+  geom_point()
+   theme_bw()+
+  ggtitle("Scatter Plot - Log Price ~ Area")
+
+scatterplot1 <- ggplot(data= data1, aes(x=Area, y=lnprice))+
+  geom_point()+
+   theme_bw()+
+  ggtitle("Scatter Plot - Log Price ~ Area")
+
+df <- data1[ -c(9, 13, 14) ]
+data.frame(df, stringsAsFactors = TRUE)
+```
+
+
+```{r eval=FALSE, include=FALSE}
+df <- data1[ -c(9, 13, 14) ]
+data.frame(df, stringsAsFactors = TRUE)
+numeric_df <- keep( df , is.numeric ) 
+
+cT <- round( cor( numeric_df , use = "complete.obs") , 2 )
+
+cT[ upper.tri( cT ) ] <- NA 
+
+melted_cormat <- melt( cT , na.rm = TRUE)
+
+cor_matrix <- ggplot( data = melted_cormat, aes( Var2, Var1 , fill = value ) )+
+  geom_tile( color = "white" ) +
+  scale_fill_gradient2(low = "green", high = "dark green", mid = "white", 
+                       midpoint = 0, limit = c(-1,1), space = "Lab", 
+                       name="Correlation") +
+  theme_tufte()+ 
+  theme( axis.text.x = element_text(angle = 45, vjust = 1, 
+                                    size = 10, hjust = 1))+
+  labs(y="",x="")+
+  coord_fixed()+
+   ggtitle("Corelation Matrix")
+ cor_matrix
+```
+
+```{r include=FALSE}
+#Regression. Going to use log because of no skewness
+
+reg1 <- feols(lnprice~Area ,df, vcov = "hetero")
+
+summary(reg1)
+
+reg2 <- feols(lnprice~Area + Parking ,df, vcov = "hetero")
+
+
+#msummary(list("Log Price" = reg1, "" = reg2, ),
+ #        fmt="%.4f",
+  #       gof_omit = 'DF|Deviance|Log.Lik.|F|R2 Adj.|AIC|BIC|R2 Pseudo|R2 Within',
+   #      stars=c('**' = .05, '***' = .01),
+    #     title = "Unconditional Regression"
+#)
+
+reg3 <-  feols(lnprice~Area + Parking + Elevator,df, vcov = "hetero")
+
+reg4 <- feols(lnprice~Area + Parking + Elevator + Warehouse, df, vcov = "hetero")
+
+
+reg5 <- feols(lnprice~Area + Parking + Elevator + Warehouse + as.factor(Room)*Area , df, vcov = "hetero")
+
+```
+
+```{r include=FALSE}
+
+huxreg(reg1, reg2, reg3, reg4,reg5, statistics = c(N = "nobs", R2 = "r.squared"))
+
+
+
+summarry_reg1 <- msummary(list(reg1 , reg2 , reg3 , reg4, reg5),
+         fmt="%.4f",
+         gof_omit = 'DF|Deviance|Log.Lik.|F|AIC|BIC|PseudoR2|Std.Errors',
+         stars=c('**' = .05, '***' = .01),
+          title = "Regression Model Summary") %>% 
+  kableExtra::kable_styling(latex_options = "hold_position")
+
+```
+```{r include=FALSE}
+#data visualization 
+# price VS  log mileage
+
+graph_dist <- ggplot(data = df, aes(x=Area, y=lnprice))+
+  geom_smooth(formula = y~x, method = "loess")+ 
+  ggtitle("Non-Parametric Lowess - Log Price & Area ")
+graph_dist
+```
+
+
+## Overview
+
+The purpose of this project is to analyze how house prices in Tehran, Iran are effected by Area and different features available in the house. The dependent variable used is Price and the independent variable is the the Area of the house. To get a detailed view we added cofounding variables to our analysis they were Parking, Elevator, Warehouse and Room.
+
+The variable description:
+
+ - Price: Price of the house in Toman
+ - PriceUSD: Price of the house in USD
+ - Area: Area in square meters 
+ - Parking: Availability of parking
+ - Elevator: Availability of an elevator
+ - Warehouse: If there is a warehouse available
+ - Room: The number of rooms the house has
+
+The dataset for this analysis was chosen from kaggle
+[**Kaggle**](https://www.kaggle.com/sajjadnajafi/tehran-houseprice-visualization-linearregression/data).
+
+```{r echo=FALSE}
+variablesummary
+
+```
+
+
+## Data Cleaning
+
+The dataset originally contained more than 3000 observations. For this project, however, we filtered one address, Punak, to get a clear analysis of other variables. Filtering the data left us with 161 observations. Then we converted the Parking, Elevator, Warehouse and Room variables to Binary variables where 1 stands for the availability of a feature in the house and 0 stands for the feature not being available. Also changed the name of the columns to get readable data. The original data contained 0 to 5 rooms but after filtering for Punak our data only contained 1, 2 and 3 rooms, therefore, we dropped columns of the remaining rooms. 
+
+- **lnprice**
+The price in the dataset is given in both Toman and USD, however, we used the USD Price and created another column for log price as the our price distribution was skewed to the right. We analysed the distribution of all our variables to check whether or not the distribution is spread out or clustered to one side. After our analysis we decided to take the log of price as the mean was greater than the median.
+
+- **Address**
+Our dataset contained a column for Address which contained a list of 192 addresses. For our analysis we only kept one address so that we could do an apples to apple comparison as there was no distance from the city center given. 
+
+- **Binary Variables**
+In the dataset the following variables were in TRUE and FALSE form:
+   - Parking
+   - Warehouse
+   - Elevator
+
+They had to be converted to 1 and 0 for us to conduct our analysis.
+The room variable was in numeric form where it contained the values from 0 to 5. This room variable was also converted into a binary variable and then rooms 0, 4 and 5 were dropped out as the filtered address Punak did not contain houses with this many rooms.
+
+
+### Correlation Matrix
+The Correlation Matrix helps us in identifying the variables relation with each other and helps us in forming a hypothesis.  
+
+## Regression Model
+We expect there to be a positive association with price and area as the area of the house increases the price of the house will increase. We also expect that the price of the house will increase if there is parking, warehouse and elevator available as these are additional features. Furthermore, the we expect that the association with rooms is also positive as the greater the number of rooms the higher the price however since rooms are related to our main independent variable as if there is a greater area the number rooms will increase. Hence, we will be using rooms as an interaction variable in our regression.
+
+To check whether or not we will be needing spline for our analysis for log price we made the below Non-Parametric Lowess graph and the shape of the curve was upward sloping without any breaks hence there was no need of using spline for our analysis.
+
+```{r, echo=FALSE,fig.width=3, fig.height=2}
+graph_dist
+```
+
+The distribution of price as seen on the figure on the right is heavily skewed with a right tail to cater to this skewness we decided to take log price. We also checked the scatter plot for area but the area was not clustered, instead distributed evenly, therefore, there was no need of taking a log of the house area. Hence we went along with the log level model for our regressions.
+
+
+**Log Price vs Area**
+
+$$log(Price)=\beta_0+\beta_1Area$$
+For our first regression we went ahead with a log level regression model. According to our regression results when the area is increased by 1 square meter the price increases by 1.41%. Both the intercept and area coefficient are statistically significant with p values of less than 0.1% and an adjusted R square of 0.849. The Confidence Interval of 95% suggests that the Area coefficient of the population lies between 0.013 and 0.015 on average and it shows that our confidence interval for this regressions is very narrow. 
+
+
+
+**Log Price vs Area + Parking**
+
+$$log(Price)=\beta_0+\beta_1Area +\beta_2Parking$$
+In the second regression we added a control variable, Parking, to the equation to compare which model is more fit for our analysis. Parking is a binary variable with 1 signifying that parking is available and 0 signifying that there is no parking available. The beta coefficient for parking shows that when there is parking available in the price of the house increases by 10.8% on average. The parking coefficient is also statistically significant at the 5% interval level. In comparison to the first model this model's adjusted R square value increases to 0.851.
+
+
+
+**Log Price vs Area + Parking + Elevator**
+
+$$log(Price)=\beta_0+\beta_1Area +\beta_2Parking+\beta_3Elevator$$
+
+The third regression we added the elevator availability to see how the price varies with a presence of an elevator in the house. The beta coefficient for Elevator is positive and statistically significant showing that the if there is an elevator present the price of the house will go up by 17%. However, the parking coefficient is not statistically significant in this model. The adjusted R square also significantly increases to 0.873 implying that this model is a better fit. 
+
+
+
+**Log Price vs Area + Parking + Elevator + Warehouse**
+
+$$log(Price)=\beta_0+\beta_1Area +\beta_2Parking+\beta_3Elevator+\beta_4Warehouse$$
+In the fourth regression model we added the warehouse binary variable that showed whether or not a warehouse being present increases the price of the apartment. According to our regression results if there is a warehouse the price of the house decreases by 16% and the beta coefficient of the warehouse variable is significant at the 5% level. The adjusted R squared value also increases to 0.875 with all beta coefficients being significant. 
+
+
+
+**Log Price vs Area + Parking + Elevator + Warehouse + Room1Area + Room2Area + Room3Area**
+
+
+$$log(Price)=\beta_0+\beta_1Area +\beta_2Parking+\beta_3Elevator+\beta_4Warehouse+\beta_5Room1*Area + \beta_6Room2*Area + \beta_7Room3*Area$$
+
+For our last model we added interaction terms with Rooms as we thought there to be a positive correlation between the number of rooms and area. The greater the number of rooms the greater the area of the house. Even though the adjusted R squared value increased to 0.881 the significance or the p-value of the beta coefficients of parking, warehouse and the interaction terms was greater than 5% showing that they are not statistically significant. 
+
+
+## Conclusion 
+
+We analyzed how price varied with area as our main independent variable and the regression results were aligned according to our initial hypothesis. 
+
+When we compared the first 2 models we saw that the adjusted R squared value increased from 0.849 to 0.851 showing that the model explained better variation between price and area. As we kept adding more variables the adjusted R squared value kept increasing showing that the best model according to it was the last one. However, the interaction variables added in the last model were not statistically significant at the 5% level and hence not showing any relation to price. Therefore, we decided to drop those variables from our model.
+
+$$log(Price)=\beta_0+\beta_1Area +\beta_2Parking+\beta_3Elevator+\beta_4Warehouse$$
+
+
+To conclude, we went along with model 4 as the variables showed significant relation at 5% confidence interval and the adjusted R squared value was also significantly higher then all other models. 
+
+
+# Appendix
+
+
+## Exhibit 1
+```{r echo=FALSE, fig.height=3, fig.width=6, message=FALSE, warning=FALSE}
+
+scatterplot
+```
+
+
+## Exhibit 2
+```{r echo=FALSE, fig.height=3, fig.width=6, message=FALSE, warning=FALSE}
+
+scatterplot1
+```
+
+## Exhibit 3
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+ cor_matrix
+```
+
+
+
+## Exhibit 4
+```{r echo=FALSE, fig.height=2, fig.width=3, message=FALSE, warning=FALSE}
+pd
+pd1
+```
+
+
+## Exhibit 4
+```{r, echo=FALSE}
+summarry_reg1
+```
+
